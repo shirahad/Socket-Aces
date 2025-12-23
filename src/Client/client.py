@@ -7,6 +7,10 @@ class Client:
     UDP_PORT = 13122  
     BUFFER_SIZE = 1024
     TEAM_NAME = "TheHighRollers"
+    
+    # --- Timeout Constants ---
+    TCP_CONNECT_TIMEOUT = 5    # Seconds to wait for TCP connection
+    TCP_RECV_TIMEOUT = 30      # Seconds to wait for server response
 
     # --- Visual Constants (ANSI Colors) ---
     RED = "\033[91m"
@@ -41,7 +45,7 @@ class Client:
         Listens on UDP port 13122 for an Offer packet.
         """
         udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        """udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)"""  
+        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) 
         udp_socket.bind(('', self.UDP_PORT))
 
         while True:
@@ -70,7 +74,11 @@ class Client:
         tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         
         try:
+            # Set connection timeout
+            tcp_socket.settimeout(self.TCP_CONNECT_TIMEOUT)
             tcp_socket.connect((ip, port))
+            # Set recv timeout for game communication
+            tcp_socket.settimeout(self.TCP_RECV_TIMEOUT)
             
             # --- Handshake ---
             rounds_str = input("How many rounds do you want to play? ")
@@ -105,8 +113,10 @@ class Client:
             # --- 1. Initial Deal ---
             print("Waiting for cards...")
             
-            for _ in range(3):
-                if not self.receive_and_print_card(conn):
+            # Receive 2 player cards + 1 dealer card (face-up)
+            for i in range(3):
+                owner = "Player" if i < 2 else "Dealer"
+                if not self.receive_and_print_card(conn, owner):
                     return False
 
             # --- 2. Player Turn ---
@@ -121,13 +131,13 @@ class Client:
                     break
                 
                 elif decision == "Hit":
-                    is_card_msg = self.receive_and_print_card(conn)
+                    is_card_msg = self.receive_and_print_card(conn, "Player")
                     if not is_card_msg:
                         return True # Round ended normally via bust
 
             # --- 3. Dealer Turn ---
             while True:
-                is_card_msg = self.receive_and_print_card(conn)
+                is_card_msg = self.receive_and_print_card(conn, "Dealer")
                 if not is_card_msg:
                     break # Round Over
             
@@ -150,18 +160,43 @@ class Client:
             except ValueError as e:
                 print(f"{self.RED}Error: Please type exactly 'Hit' or 'Stand'.{self.RESET}")
 
-    def receive_and_print_card(self, conn):
+    def recv_exact(self, conn, num_bytes):
+        """
+        Receives exactly num_bytes from the socket.
+        Handles partial reads and ensures complete data.
+        """
+        data = b''
+        while len(data) < num_bytes:
+            try:
+                chunk = conn.recv(num_bytes - len(data))
+                if not chunk:
+                    raise ConnectionError("Server disconnected.")
+                data += chunk
+            except socket.timeout:
+                raise TimeoutError("Server response timed out.")
+        return data
+
+    def receive_and_print_card(self, conn, owner=""):
         """
         Reads one packet from the server.
         """
-        data = conn.recv(9)
-        if not data:
-            raise ConnectionError("Server disconnected.")
+        try:
+            data = self.recv_exact(conn, 9)
+        except TimeoutError as e:
+            print(f"{self.RED}Timeout: {e}{self.RESET}")
+            raise
+        except ConnectionError as e:
+            print(f"{self.RED}Connection lost: {e}{self.RESET}")
+            raise
 
-        result, rank, suit = BlackjackClientProtocol.unpack_payload_server(data)
+        try:
+            result, rank, suit = BlackjackClientProtocol.unpack_payload_server(data)
+        except ValueError as e:
+            print(f"{self.RED}Corrupted message from server: {e}{self.RESET}")
+            raise
 
         if result == 0:
-            self.print_card(rank, suit)
+            self.print_card(rank, suit, owner)
             return True
         else:
             self.print_result(result)
@@ -181,7 +216,7 @@ class Client:
         """
         print(joker_art)
 
-    def print_card(self, rank, suit):
+    def print_card(self, rank, suit, owner=""):
         """Prints a card with graphical suits and colors."""
         # Visual Mapping
         suits_symbols = {0: "♥", 1: "♦", 2: "♣", 3: "♠"}
@@ -194,6 +229,11 @@ class Client:
         # Color Logic: Hearts/Diamonds are RED, Clubs/Spades are WHITE (or default)
         # Using ANSI colors directly
         color = self.RED if suit in [0, 1] else self.CYAN
+        
+        # Print owner label
+        if owner:
+            owner_color = self.GREEN if owner == "Player" else self.YELLOW
+            print(f"{owner_color}[{owner}'s Card]{self.RESET}")
         
         # ASCII Card Frame
         card_art = (

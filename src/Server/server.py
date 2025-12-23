@@ -10,6 +10,9 @@ class Server:
     
     SERVER_NAME = "CasinoRoyaleServer"
     
+    # --- Timeout Constants ---
+    CLIENT_TIMEOUT = 60  # Seconds to wait for client response
+    
     def __init__(self):
         self.server_ip = self.get_local_ip()
         self.tcp_port = 0 # 0 lets the OS pick a free random port
@@ -74,20 +77,38 @@ class Server:
                 print(f"UDP Broadcast error: {e}")
                 time.sleep(1)
 
+    def recv_exact(self, conn, num_bytes):
+        """
+        Receives exactly num_bytes from the socket.
+        Handles partial reads and ensures complete data.
+        """
+        data = b''
+        while len(data) < num_bytes:
+            chunk = conn.recv(num_bytes - len(data))
+            if not chunk:
+                raise ConnectionError("Client disconnected.")
+            data += chunk
+        return data
+
     def handle_client(self, conn):
         """Manages the full game session with a single client."""
         try:
+            # Set timeout for client responses
+            conn.settimeout(self.CLIENT_TIMEOUT)
+            
             # --- 1. Receive Request ---
-            data = conn.recv(1024)
-            if not data:
-                return 
+            try:
+                data = self.recv_exact(conn, 38)  # Request packet is 38 bytes
+            except (socket.timeout, ConnectionError) as e:
+                print(f"Failed to receive handshake: {e}")
+                return
 
             # Parse handshake using Protocol class
             try:
                 rounds, team_name = BlackjackServerProtocol.unpack_request(data)
                 print(f"Game started with team: {team_name} for {rounds} rounds")
             except ValueError as e:
-                print(f"Handshake failed: {e}")
+                print(f"Handshake failed (corrupted data): {e}")
                 return
 
             # --- 2. Game Loop ---
@@ -119,6 +140,9 @@ class Server:
         try:
             self.send_card(conn, player_hand[0]) # Card 1
             self.send_card(conn, player_hand[1]) # Card 2
+            # Send only dealer's first card (second is hidden)
+            self.send_card(conn, dealer_hand[0]) # Dealer Card 1 (Visible)
+
         except Exception as e:
             print(f"Error sending initial cards: {e}")
             return False
@@ -127,11 +151,8 @@ class Server:
         player_busted = False
         while True:
             try:
-                # Wait for player decision packet
-                data = conn.recv(1024)
-                if not data: 
-                    print("Client disconnected unexpectedly.")
-                    return False
+                # Wait for player decision packet (10 bytes)
+                data = self.recv_exact(conn, 10)
                 
                 # Use Protocol to unpack and VALIDATE (Strict check)
                 decision = BlackjackServerProtocol.unpack_player_decision(data)
@@ -152,8 +173,11 @@ class Server:
                 # STRICT ERROR HANDLING: Disconnect immediately on protocol violation
                 print(f"Protocol violation by client: {e}. Terminating connection.")
                 return False
-            except Exception as e:
-                print(f"Unexpected error during player turn: {e}")
+            except socket.timeout:
+                print("Client response timed out. Terminating connection.")
+                return False
+            except ConnectionError as e:
+                print(f"Client disconnected: {e}")
                 return False
 
         # --- Dealer Turn ---
