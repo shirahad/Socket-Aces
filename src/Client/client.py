@@ -1,0 +1,224 @@
+import socket
+import sys
+from BlackjackClientProtocol import BlackjackClientProtocol
+
+class Client:
+    # --- Configuration ---
+    UDP_PORT = 13122  
+    BUFFER_SIZE = 1024
+    TEAM_NAME = "TheHighRollers"
+
+    # --- Visual Constants (ANSI Colors) ---
+    RED = "\033[91m"
+    RESET = "\033[0m"
+    GREEN = "\033[92m"
+    BLUE = "\033[94m"
+    YELLOW = "\033[93m"
+    CYAN = "\033[96m"
+
+    def __init__(self):
+        self.print_welcome_joker()
+        print(f"{self.GREEN}Client started, listening for offer requests...{self.RESET}")
+
+    def start(self):
+        """
+        Main application loop.
+        """
+        while True:
+            try:
+                # Step 1: Find a server via UDP broadcast
+                server_ip, server_port = self.find_server()
+                
+                # Step 2: Connect and play
+                self.connect_and_play(server_ip, server_port)
+
+            except Exception as e:
+                print(f"{self.RED}Error in main loop: {e}{self.RESET}")
+                print("Restarting listener...")
+
+    def find_server(self):
+        """
+        Listens on UDP port 13122 for an Offer packet.
+        """
+        udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        """udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)"""  
+        udp_socket.bind(('', self.UDP_PORT))
+
+        while True:
+            try:
+                data, addr = udp_socket.recvfrom(self.BUFFER_SIZE)
+                server_ip = addr[0]
+
+                server_tcp_port, server_name = BlackjackClientProtocol.unpack_offer(data)
+                
+                print(f"{self.YELLOW}Received offer from {server_ip} ('{server_name}'){self.RESET}")
+                
+                udp_socket.close()
+                return server_ip, server_tcp_port
+
+            except ValueError:
+                continue
+            except Exception as e:
+                print(f"UDP Error: {e}")
+                udp_socket.close()
+                raise
+
+    def connect_and_play(self, ip, port):
+        """
+        Establishes TCP connection and manages the game session.
+        """
+        tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
+        try:
+            tcp_socket.connect((ip, port))
+            
+            # --- Handshake ---
+            rounds_str = input("How many rounds do you want to play? ")
+            while not rounds_str.isdigit():
+                rounds_str = input("Please enter a valid positive integer for rounds: ")
+            
+            rounds = int(rounds_str)
+
+            # Send Request Packet
+            req_packet = BlackjackClientProtocol.pack_request(rounds, self.TEAM_NAME)
+            tcp_socket.sendall(req_packet)
+
+            # --- Game Loop ---
+            for i in range(rounds):
+                print(f"\n{self.BLUE}=== Round {i+1} ==={self.RESET}")
+                success = self.play_round(tcp_socket)
+                if not success:
+                    break 
+            
+            print("Session finished. Disconnecting.")
+
+        except Exception as e:
+            print(f"{self.RED}Connection error: {e}{self.RESET}")
+        finally:
+            tcp_socket.close()
+
+    def play_round(self, conn):
+        """
+        Logic for a single round.
+        """
+        try:
+            # --- 1. Initial Deal ---
+            print("Waiting for cards...")
+            
+            for _ in range(3):
+                if not self.receive_and_print_card(conn):
+                    return False
+
+            # --- 2. Player Turn ---
+            while True:
+                decision = self.get_valid_user_decision()
+                
+                packet = BlackjackClientProtocol.pack_player_decision(decision)
+                conn.sendall(packet)
+
+                if decision == "Stand":
+                    print("Standing. Watching Dealer...")
+                    break
+                
+                elif decision == "Hit":
+                    is_card_msg = self.receive_and_print_card(conn)
+                    if not is_card_msg:
+                        return True # Round ended normally via bust
+
+            # --- 3. Dealer Turn ---
+            while True:
+                is_card_msg = self.receive_and_print_card(conn)
+                if not is_card_msg:
+                    break # Round Over
+            
+            return True
+
+        except Exception as e:
+            print(f"Round Error: {e}")
+            return False
+
+    def get_valid_user_decision(self):
+        """
+        Loops until the user enters exactly 'Hit' or 'Stand'.
+        """
+        while True:
+            user_input = input("Your move (Hit/Stand): ")
+            try:
+                BlackjackClientProtocol.pack_player_decision(user_input)
+                return user_input.strip().title()
+                
+            except ValueError as e:
+                print(f"{self.RED}Error: Please type exactly 'Hit' or 'Stand'.{self.RESET}")
+
+    def receive_and_print_card(self, conn):
+        """
+        Reads one packet from the server.
+        """
+        data = conn.recv(9)
+        if not data:
+            raise ConnectionError("Server disconnected.")
+
+        result, rank, suit = BlackjackClientProtocol.unpack_payload_server(data)
+
+        if result == 0:
+            self.print_card(rank, suit)
+            return True
+        else:
+            self.print_result(result)
+            return False
+
+    # --- Visual / Printing Methods ---
+
+    def print_welcome_joker(self):
+        """Prints a cool ASCII Art Joker at startup."""
+        joker_art = f"""{self.YELLOW}
+           .------.
+          |A .   |
+          | / \\  |
+          |(_,_) |  Welcome to
+          |  I   |  Blackjack 2025!
+          `------'{self.RESET}
+        """
+        print(joker_art)
+
+    def print_card(self, rank, suit):
+        """Prints a card with graphical suits and colors."""
+        # Visual Mapping
+        suits_symbols = {0: "♥", 1: "♦", 2: "♣", 3: "♠"}
+        ranks_map = {1: "A", 11: "J", 12: "Q", 13: "K"}
+        
+        # Determine Rank String
+        rank_str = ranks_map.get(rank, str(rank))
+        symbol = suits_symbols.get(suit, "?")
+        
+        # Color Logic: Hearts/Diamonds are RED, Clubs/Spades are WHITE (or default)
+        # Using ANSI colors directly
+        color = self.RED if suit in [0, 1] else self.CYAN
+        
+        # ASCII Card Frame
+        card_art = (
+            f"{color}"
+            f"┌───────┐\n"
+            f"| {rank_str:<2}    |\n"
+            f"|   {symbol}   |\n"
+            f"|    {rank_str:>2} |\n"
+            f"└───────┘{self.RESET}"
+        )
+        print(card_art)
+
+    def print_result(self, result_code):
+        """Prints the final game outcome with flair."""
+        print("-" * 30)
+        if result_code == 0x3:
+            print(f"{self.GREEN}🏆  WINNER WINNER CHICKEN DINNER! 🏆{self.RESET}")
+        elif result_code == 0x2:
+            print(f"{self.RED}💀  YOU BUSTED / LOST! 💀{self.RESET}")
+        elif result_code == 0x1:
+            print(f"{self.YELLOW}⚖️  IT'S A TIE! ⚖️{self.RESET}")
+        else:
+            print(f"Unknown result code: {result_code}")
+        print("-" * 30)
+
+if __name__ == "__main__":
+    client = Client()
+    client.start()
