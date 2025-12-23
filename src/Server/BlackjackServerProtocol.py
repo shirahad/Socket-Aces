@@ -13,7 +13,7 @@ class BlackjackServerProtocol:
     MSG_PAYLOAD = 0x4
     
     # --- 1. Offer Message (Server -> Broadcast) ---
-    # [cite_start]Format: [Magic 4] [Type 1] [Port 2] [Name 32] [cite: 85-90]
+    # Format: [Magic 4] [Type 1] [Port 2] [Name 32]
 
     @staticmethod
     def pack_offer(server_port, server_name):
@@ -42,7 +42,7 @@ class BlackjackServerProtocol:
         return rounds, team_name
 
     # --- 3. Payload: Game Status / Card (Server -> Client) ---
-    # [cite_start]Format: [Magic 4] [Type 1] [Result 1] [Rank 2] [Suit 1] [cite: 96, 101-103]
+    # Format: [Magic 4] [Type 1] [Result 1] [Rank 2] [Suit 1]
 
     @staticmethod
     def pack_payload_server(result_code, card_rank=0, card_suit=0):
