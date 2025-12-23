@@ -3,8 +3,7 @@ import threading
 import time
 import random
 
-import BlackjackServerProtocol 
-
+from BlackjackServerProtocol import BlackjackServerProtocol
 class Server:
     # --- Network Constants ---
     UDP_DEST_PORT = 13122 
