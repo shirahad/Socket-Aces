@@ -160,11 +160,18 @@ class Server:
                 if decision == "Hit":
                     new_card = deck.pop()
                     player_hand.append(new_card)
-                    self.send_card(conn, new_card) # Send new card to client
-                    
-                    if self.calculate_score(player_hand) > 21: # Check Bust
-                        player_busted = True
-                        break 
+
+                    # CHECK SCORE BEFORE SENDING
+                    score = self.calculate_score(player_hand)
+                    if score > 21: 
+                        # BUST! Send Card AND Result in one packet
+                        # Result 0x2 = Loss
+                        packet = BlackjackServerProtocol.pack_payload_server(0x2, new_card[0], new_card[1])
+                        conn.sendall(packet)
+                        return True # Round completely over
+                    else:
+                        # Send just the Card (Result 0x0)
+                        self.send_card(conn, new_card)
                         
                 elif decision == "Stand":
                     break
@@ -192,11 +199,18 @@ class Server:
                     new_card = deck.pop()
                     dealer_hand.append(new_card)
                     
-                    # Reveal each new card to the client 
-                    self.send_card(conn, new_card)
+                    # Check Dealer Bust/Stand logic for the *Last* card
+                    dealer_score = self.calculate_score(dealer_hand)
                 
-                if self.calculate_score(dealer_hand) > 21: # Check Dealer Bust
-                    dealer_busted = True
+                    if dealer_score > 21:
+                        # Dealer Busts -> Player Wins (0x3)
+                        # Send Final Card + Win Result
+                        packet = BlackjackServerProtocol.pack_payload_server(0x3, new_card[0], new_card[1])
+                        conn.sendall(packet)
+                        return True
+                    else:
+                        # Dealer continues hitting
+                        self.send_card(conn, new_card)
             except Exception:
                 return False
 
