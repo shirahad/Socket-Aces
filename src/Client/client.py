@@ -114,7 +114,6 @@ class Client:
         except Exception as e:
             print(f"{self.RED}Connection error: {e}{self.RESET}")
         finally:
-            self.print_statistics()
             tcp_socket.close()
 
     def get_strategy_advice(self, player_sum, dealer_card_rank):
@@ -226,7 +225,10 @@ class Client:
 
     def receive_and_print_card(self, conn, owner=""):
         """
-        Reads one packet from the server.
+        Reads one packet. 
+        Prints card if present. 
+        Prints result if present.
+        Returns: card value if game continues, False if game over.
         """
         try:
             data = self.recv_exact(conn, 9)
@@ -243,14 +245,19 @@ class Client:
             print(f"{self.RED}Corrupted message from server: {e}{self.RESET}")
             raise
 
-        if result == 0:
+        # 1. Always print the card if there is one 
+        # Even if 'result' says we lost, we want to see the card that killed us!
+        if rank in range(1, 14) and suit in range(0, 4):
             self.print_card(rank, suit, owner)
-            # RETURN THE VALUE OF THE CARD (Ace=11, Face=10)
-            if rank == 1: return 11
-            elif rank >= 10: return 10
-            else: return rank
+
+        # 2. Check the Result
+        if result == 0:
+            # Game is still going
+            return 11 if rank == 1 else 10 if rank >= 10 else rank
         else:
+            # Game Over (Win/Loss/Tie)
             self.print_result(result)
+            self.print_statistics()
             return False
 
     # --- Visual / Printing Methods ---

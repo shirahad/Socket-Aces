@@ -258,11 +258,9 @@ class Server:
     def calculate_score(self, cards):
         """Calculates hand value (Ace = 1 or 11 : An added feature)."""
         score = 0
-        aces = 0
         for rank, suit in cards:
             if rank == 1: # Ace
                 score += 11
-                aces += 1
             elif rank >= 10: # Face cards (J,Q,K) are 10
                 score += 10
             else:
