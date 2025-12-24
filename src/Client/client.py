@@ -105,6 +105,31 @@ class Client:
         finally:
             tcp_socket.close()
 
+    def get_strategy_advice(self, player_sum, dealer_card_rank):
+        """
+        Returns 'Hit' or 'Stand' based on Basic Blackjack Strategy.
+        """
+        # Normalize face cards (J,Q,K=10) for strategy math
+        d_val = 10 if dealer_card_rank >= 10 else (11 if dealer_card_rank == 1 else dealer_card_rank)
+        
+        # 1. Always Stand on 17 or higher (Hard total)
+        if player_sum >= 17:
+            return "Stand"
+        
+        # 2. Always Hit on 11 or less
+        if player_sum <= 11:
+            return "Hit"
+            
+        # 3. Tricky Middle Ground (12-16) ("Stiff Hands")
+        # Strategy: Stand if dealer is weak (2-6), Hit if dealer is strong (7-Ace)
+        if 12 <= player_sum <= 16:
+            if 2 <= d_val <= 6:
+                return "Stand" # Dealer likely to bust
+            else:
+                return "Hit"   # Dealer likely to beat you, take a risk
+        
+        return "Hit" # Fallback
+
     def play_round(self, conn):
         """
         Logic for a single round.
@@ -113,14 +138,25 @@ class Client:
             # --- 1. Initial Deal ---
             print("Waiting for cards...")
             
+            player_hand_val = 0
+            dealer_up_card = 0
+
             # Receive 2 player cards + 1 dealer card (face-up)
-            for i in range(3):
-                owner = "Player" if i < 2 else "Dealer"
-                if not self.receive_and_print_card(conn, owner):
+            for i in range(2):
+                val = self.receive_and_print_card(conn, "Player")
+                if not val:
                     return False
+                player_hand_val += val
+            dealer_up_card = self.receive_and_print_card(conn, "Dealer")
+            if not dealer_up_card:
+                return False
 
             # --- 2. Player Turn ---
             while True:
+                # Get Advice
+                advice = self.get_strategy_advice(player_hand_val, dealer_up_card)
+                print(f"{self.CYAN}[💡 Advisor]: Statistically, you should {advice.upper()}{self.RESET}")
+                
                 decision = self.get_valid_user_decision()
                 
                 packet = BlackjackClientProtocol.pack_player_decision(decision)
@@ -131,18 +167,16 @@ class Client:
                     break
                 
                 elif decision == "Hit":
-                    is_card_msg = self.receive_and_print_card(conn, "Player")
-                    if not is_card_msg:
-                        return True # Round ended normally via bust
+                    val = self.receive_and_print_card(conn)
+                    if val is False: return True # Bust/Game Over
+                    player_hand_val += val # Update sum for next advice
 
             # --- 3. Dealer Turn ---
             while True:
-                is_card_msg = self.receive_and_print_card(conn, "Dealer")
-                if not is_card_msg:
-                    break # Round Over
-            
+                if self.receive_and_print_card(conn) is False:
+                    break
             return True
-
+            
         except Exception as e:
             print(f"Round Error: {e}")
             return False
@@ -197,7 +231,10 @@ class Client:
 
         if result == 0:
             self.print_card(rank, suit, owner)
-            return True
+            # RETURN THE VALUE OF THE CARD (Ace=11, Face=10)
+            if rank == 1: return 11
+            elif rank >= 10: return 10
+            else: return rank
         else:
             self.print_result(result)
             return False

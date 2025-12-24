@@ -253,12 +253,6 @@ class Server:
                 score += 10
             else:
                 score += rank # Number cards
-        
-        # Adjust for Aces if bust (Standard Blackjack rule)
-        while score > 21 and aces > 0:
-            score -= 10
-            aces -= 1
-            
         return score
 
 if __name__ == "__main__":
