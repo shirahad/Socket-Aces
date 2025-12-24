@@ -179,7 +179,7 @@ class Client:
                     break
                 
                 elif decision == "Hit":
-                    self.stats["stands"] += 1
+                    self.stats["hits"] += 1
                     val = self.receive_and_print_card(conn)
                     if val is False: return True # Bust/Game Over
                     player_hand_val += val # Update sum for next advice

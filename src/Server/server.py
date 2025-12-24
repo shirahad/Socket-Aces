@@ -11,7 +11,7 @@ class Server:
     SERVER_NAME = "CasinoRoyaleServer"
     
     # --- Timeout Constants ---
-    CLIENT_TIMEOUT = 60  # Seconds to wait for client response
+    CLIENT_TIMEOUT = 120  # Seconds to wait for client response
     
     def __init__(self):
         self.server_ip = self.get_local_ip()
