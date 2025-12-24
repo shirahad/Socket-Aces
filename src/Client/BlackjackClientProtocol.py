@@ -1,15 +1,19 @@
 import struct
+import sys
+import os
+
+# Add parent directory to path to import shared module
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from shared.protocol_constants import (
+    MAGIC_COOKIE, MSG_OFFER, MSG_REQUEST, MSG_PAYLOAD,
+    OFFER_PACKET_SIZE, SERVER_PAYLOAD_SIZE
+)
 
 class BlackjackClientProtocol:
     """
-    protocol logic for Client.
-    Implements packing and unpacking of messages according to the Blackjack protocol."""
-    
-    # --- Constants ---
-    MAGIC_COOKIE = 0xabcddcba
-    MSG_OFFER = 0x2
-    MSG_REQUEST = 0x3
-    MSG_PAYLOAD = 0x4
+    Protocol logic for Client.
+    Implements packing and unpacking of messages according to the Blackjack protocol.
+    """
     
     # --- 1. Offer Message (Server -> Broadcast) ---
     # Format: [Magic 4] [Type 1] [Port 2] [Name 32] 
@@ -17,14 +21,14 @@ class BlackjackClientProtocol:
     @staticmethod
     def unpack_offer(data):
         """Used by Client to find the Server."""
-        if len(data) < 39:
+        if len(data) < OFFER_PACKET_SIZE:
             raise ValueError("Offer packet too short")
             
         cookie, msg_type, server_port, name_bytes = struct.unpack('!I B H 32s', data[:39])
         
-        if cookie != BlackjackClientProtocol.MAGIC_COOKIE:
+        if cookie != MAGIC_COOKIE:
             raise ValueError("Invalid Magic Cookie")
-        if msg_type != BlackjackClientProtocol.MSG_OFFER:
+        if msg_type != MSG_OFFER:
             raise ValueError("Invalid Message Type (Expected Offer)")
             
         server_name = name_bytes.decode('utf-8').strip('\x00')
@@ -38,8 +42,8 @@ class BlackjackClientProtocol:
         """Used by Client to initiate a game."""
         name_bytes = team_name.encode('utf-8')[:32].ljust(32, b'\x00')
         return struct.pack('!I B B 32s', 
-                           BlackjackClientProtocol.MAGIC_COOKIE, 
-                           BlackjackClientProtocol.MSG_REQUEST, 
+                           MAGIC_COOKIE, 
+                           MSG_REQUEST, 
                            rounds, 
                            name_bytes)
 
@@ -49,14 +53,14 @@ class BlackjackClientProtocol:
     @staticmethod
     def unpack_payload_server(data):
         """Used by Client to read cards or game results."""
-        if len(data) < 9: # 4 + 1 + 1 + 2 + 1 = 9 bytes
+        if len(data) < SERVER_PAYLOAD_SIZE:
             raise ValueError("Server Payload packet too short")
             
         cookie, msg_type, result_code, card_rank, card_suit = struct.unpack('!I B B H B', data[:9])
         
-        if cookie != BlackjackClientProtocol.MAGIC_COOKIE:
+        if cookie != MAGIC_COOKIE:
             raise ValueError("Invalid Magic Cookie")
-        if msg_type != BlackjackClientProtocol.MSG_PAYLOAD:
+        if msg_type != MSG_PAYLOAD:
             raise ValueError("Invalid Message Type (Expected Payload)")
             
         return result_code, card_rank, card_suit
@@ -77,6 +81,6 @@ class BlackjackClientProtocol:
         protocol_string = decision_map[normalized_decision]
         
         return struct.pack('!I B 5s',
-                           BlackjackClientProtocol.MAGIC_COOKIE,
-                           BlackjackClientProtocol.MSG_PAYLOAD,
+                           MAGIC_COOKIE,
+                           MSG_PAYLOAD,
                            protocol_string.encode('utf-8'))

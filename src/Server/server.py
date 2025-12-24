@@ -1,9 +1,19 @@
 import socket
 import threading
 import time
-import random
+import sys
+import os
+
+# Add parent directory to path to import shared module
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from BlackjackServerProtocol import BlackjackServerProtocol
+from shared.blackjack_game import BlackjackGame
+from shared.protocol_constants import (
+    RESULT_WIN, RESULT_LOSS, RESULT_TIE, RESULT_CONTINUE,
+    REQUEST_PACKET_SIZE, CLIENT_PAYLOAD_SIZE
+)
+
 class Server:
     # --- Network Constants ---
     UDP_DEST_PORT = 13122 
@@ -130,19 +140,16 @@ class Server:
         Executes one round of Blackjack. 
         Returns True if successful, False if connection/protocol failed.
         """
-        deck = self.create_deck()
+        game = BlackjackGame()
         
-        # Initial Deal: 2 cards for player, 2 for dealer
-        player_hand = [deck.pop(), deck.pop()]
-        dealer_hand = [deck.pop(), deck.pop()]
+        # Initial Deal: 2 cards for player, 1 visible for dealer
+        player_cards, dealer_visible = game.deal_initial()
         
-        # Send initial cards to client (Server sends Payload)
+        # Send initial cards to client
         try:
-            self.send_card(conn, player_hand[0]) # Card 1
-            self.send_card(conn, player_hand[1]) # Card 2
-            # Send only dealer's first card (second is hidden)
-            self.send_card(conn, dealer_hand[0]) # Dealer Card 1 (Visible)
-
+            self.send_card(conn, player_cards[0])
+            self.send_card(conn, player_cards[1])
+            self.send_card(conn, dealer_visible)
         except Exception as e:
             print(f"Error sending initial cards: {e}")
             return False
@@ -151,33 +158,27 @@ class Server:
         player_busted = False
         while True:
             try:
-                # Wait for player decision packet (10 bytes)
-                data = self.recv_exact(conn, 10)
-                
-                # Use Protocol to unpack and VALIDATE (Strict check)
+                # Wait for player decision packet
+                data = self.recv_exact(conn, CLIENT_PAYLOAD_SIZE)
                 decision = BlackjackServerProtocol.unpack_player_decision(data)
                 
                 if decision == "Hit":
-                    new_card = deck.pop()
-                    player_hand.append(new_card)
-
-                    # CHECK SCORE BEFORE SENDING
-                    score = self.calculate_score(player_hand)
-                    if score > 21: 
+                    new_card, is_bust = game.player_hit()
+                    
+                    if is_bust:
                         # BUST! Send Card AND Result in one packet
-                        # Result 0x2 = Loss
-                        packet = BlackjackServerProtocol.pack_payload_server(0x2, new_card[0], new_card[1])
+                        packet = BlackjackServerProtocol.pack_payload_server(
+                            RESULT_LOSS, new_card[0], new_card[1]
+                        )
                         conn.sendall(packet)
-                        return True # Round completely over
+                        return True
                     else:
-                        # Send just the Card (Result 0x0)
                         self.send_card(conn, new_card)
                         
                 elif decision == "Stand":
                     break
                     
             except ValueError as e:
-                # STRICT ERROR HANDLING: Disconnect immediately on protocol violation
                 print(f"Protocol violation by client: {e}. Terminating connection.")
                 return False
             except socket.timeout:
@@ -188,52 +189,24 @@ class Server:
                 return False
 
         # --- Dealer Turn ---
-        dealer_busted = False
-        if not player_busted:
-            try:
-                # FIRST: Reveal the hidden second card to the client 
-                self.send_card(conn, dealer_hand[1])
-
-                # Dealer logic: Draw until sum >= 17 
-                while self.calculate_score(dealer_hand) < 17:
-                    new_card = deck.pop()
-                    dealer_hand.append(new_card)
-                    
-                    # Check Dealer Bust/Stand logic for the *Last* card
-                    dealer_score = self.calculate_score(dealer_hand)
-                
-                    if dealer_score > 21:
-                        # Dealer Busts -> Player Wins (0x3)
-                        # Send Final Card + Win Result
-                        packet = BlackjackServerProtocol.pack_payload_server(0x3, new_card[0], new_card[1])
-                        conn.sendall(packet)
-                        return True
-                    else:
-                        # Dealer continues hitting
-                        self.send_card(conn, new_card)
-            except Exception:
-                return False
-
-        # --- 4. Determine Winner and Send Result ---
-        player_score = self.calculate_score(player_hand)
-        dealer_score = self.calculate_score(dealer_hand)
-        
-        # Result codes: Win=0x3, Loss=0x2, Tie=0x1
-        result_code = 0
-        if player_busted:
-            result_code = 0x2 # Loss (Player busted) 
-        elif dealer_busted:
-            result_code = 0x3 # Win (Dealer busted) 
-        elif player_score > dealer_score:
-            result_code = 0x3 # Win 
-        elif dealer_score > player_score:
-            result_code = 0x2 # Loss 
-        else:
-            result_code = 0x1 # Tie 
-
-        # Send final result packet 
         try:
-            # Result packet uses dummy card (0,0) as placeholder
+            for card, is_bust in game.dealer_turn():
+                if is_bust:
+                    # Dealer busted - player wins
+                    packet = BlackjackServerProtocol.pack_payload_server(
+                        RESULT_WIN, card[0], card[1]
+                    )
+                    conn.sendall(packet)
+                    return True
+                else:
+                    self.send_card(conn, card)
+        except Exception:
+            return False
+
+        # --- Determine Winner and Send Result ---
+        result_code = game.determine_winner(player_busted)
+        
+        try:
             packet = BlackjackServerProtocol.pack_payload_server(result_code)
             conn.sendall(packet)
             return True
@@ -243,29 +216,9 @@ class Server:
     def send_card(self, conn, card):
         """Helper to send a card using the Protocol class."""
         rank, suit = card
-        # Result Code 0x0 means 'Round Not Over'
-        packet = BlackjackServerProtocol.pack_payload_server(0x0, rank, suit)
+        packet = BlackjackServerProtocol.pack_payload_server(RESULT_CONTINUE, rank, suit)
         conn.sendall(packet)
 
-    def create_deck(self):
-        """Generates a standard 52-card deck."""
-        # Suits: 0-3 (Heart, Diamond, Club, Spade)
-        # Ranks: 1-13
-        deck = [(rank, suit) for suit in range(4) for rank in range(1, 14)]
-        random.shuffle(deck) #
-        return deck
-
-    def calculate_score(self, cards):
-        """Calculates hand value (Ace = 1 or 11 : An added feature)."""
-        score = 0
-        for rank, suit in cards:
-            if rank == 1: # Ace
-                score += 11
-            elif rank >= 10: # Face cards (J,Q,K) are 10
-                score += 10
-            else:
-                score += rank # Number cards
-        return score
 
 if __name__ == "__main__":
     server = Server()

@@ -1,6 +1,17 @@
 import socket
 import sys
+import os
+
+# Add parent directory to path to import shared module
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from BlackjackClientProtocol import BlackjackClientProtocol
+from blackjack_ui import BlackjackUI
+from shared.protocol_constants import (
+    RESULT_WIN, RESULT_LOSS, RESULT_TIE, RESULT_CONTINUE,
+    SERVER_PAYLOAD_SIZE
+)
+
 
 class Client:
     # --- Configuration ---
@@ -12,27 +23,18 @@ class Client:
     TCP_CONNECT_TIMEOUT = 5    # Seconds to wait for TCP connection
     TCP_RECV_TIMEOUT = 30      # Seconds to wait for server response
 
-    # --- Visual Constants (ANSI Colors) ---
-    RED = "\033[91m"
-    RESET = "\033[0m"
-    GREEN = "\033[92m"
-    BLUE = "\033[94m"
-    YELLOW = "\033[93m"
-    CYAN = "\033[96m"
-
     def __init__(self):
-        self.print_welcome_joker()
-        print(f"{self.GREEN}Client started, listening for offer requests...{self.RESET}")
+        self.ui = BlackjackUI()
         
         self.stats = {
-        "rounds_played": 0,
-        "wins": 0,
-        "losses": 0,
-        "ties": 0,
-        "player_busts": 0,
-        "dealer_busts": 0,
-        "hits": 0,
-        "stands": 0
+            "rounds_played": 0,
+            "wins": 0,
+            "losses": 0,
+            "ties": 0,
+            "player_busts": 0,
+            "dealer_busts": 0,
+            "hits": 0,
+            "stands": 0
         }
 
     def start(self):
@@ -48,8 +50,8 @@ class Client:
                 self.connect_and_play(server_ip, server_port)
 
             except Exception as e:
-                print(f"{self.RED}Error in main loop: {e}{self.RESET}")
-                print("Restarting listener...")
+                self.ui.print_error(f"Error in main loop: {e}")
+                self.ui.print_info("Restarting listener...")
 
     def find_server(self):
         """
@@ -66,7 +68,7 @@ class Client:
 
                 server_tcp_port, server_name = BlackjackClientProtocol.unpack_offer(data)
                 
-                print(f"{self.YELLOW}Received offer from {server_ip} ('{server_name}'){self.RESET}")
+                self.ui.print_offer_received(server_ip, server_name)
                 
                 udp_socket.close()
                 return server_ip, server_tcp_port
@@ -74,7 +76,7 @@ class Client:
             except ValueError:
                 continue
             except Exception as e:
-                print(f"UDP Error: {e}")
+                self.ui.print_error(f"UDP Error: {e}")
                 udp_socket.close()
                 raise
 
@@ -92,11 +94,7 @@ class Client:
             tcp_socket.settimeout(self.TCP_RECV_TIMEOUT)
             
             # --- Handshake ---
-            rounds_str = input("How many rounds do you want to play? ")
-            while not rounds_str.isdigit():
-                rounds_str = input("Please enter a valid positive integer for rounds: ")
-            
-            rounds = int(rounds_str)
+            rounds = self.ui.get_rounds_input()
 
             # Send Request Packet
             req_packet = BlackjackClientProtocol.pack_request(rounds, self.TEAM_NAME)
@@ -104,15 +102,15 @@ class Client:
 
             # --- Game Loop ---
             for i in range(rounds):
-                print(f"\n{self.BLUE}=== Round {i+1} ==={self.RESET}")
+                self.ui.print_round_header(i + 1)
                 success = self.play_round(tcp_socket)
                 if not success:
                     break 
             
-            print("Session finished. Disconnecting.")
+            self.ui.print_info("Session finished. Disconnecting.")
 
         except Exception as e:
-            print(f"{self.RED}Connection error: {e}{self.RESET}")
+            self.ui.print_error(f"Connection error: {e}")
         finally:
             tcp_socket.close()
 
@@ -147,7 +145,7 @@ class Client:
         """
         try:
             # --- 1. Initial Deal ---
-            print("Waiting for cards...")
+            self.ui.print_waiting_for_cards()
             
             player_hand_val = 0
             dealer_up_card = 0
@@ -166,7 +164,7 @@ class Client:
             while True:
                 # Get Advice
                 advice = self.get_strategy_advice(player_hand_val, dealer_up_card)
-                print(f"{self.CYAN}[💡 Advisor]: Statistically, you should {advice.upper()}{self.RESET}")
+                self.ui.print_advice(advice)
                 
                 decision = self.get_valid_user_decision()
                 
@@ -174,7 +172,7 @@ class Client:
                 conn.sendall(packet)
 
                 if decision == "Stand":
-                    print("Standing. Watching Dealer...")
+                    self.ui.print_standing()
                     self.stats["stands"] += 1
                     break
                 
@@ -191,7 +189,7 @@ class Client:
             return True
             
         except Exception as e:
-            print(f"Round Error: {e}")
+            self.ui.print_error(f"Round Error: {e}")
             return False
 
     def get_valid_user_decision(self):
@@ -199,13 +197,13 @@ class Client:
         Loops until the user enters exactly 'Hit' or 'Stand'.
         """
         while True:
-            user_input = input("Your move (Hit/Stand): ")
+            user_input = self.ui.get_decision_input()
             try:
                 BlackjackClientProtocol.pack_player_decision(user_input)
                 return user_input.strip().title()
                 
             except ValueError as e:
-                print(f"{self.RED}Error: Please type exactly 'Hit' or 'Stand'.{self.RESET}")
+                self.ui.print_invalid_decision()
 
     def recv_exact(self, conn, num_bytes):
         """
@@ -231,27 +229,27 @@ class Client:
         Returns: card value if game continues, False if game over.
         """
         try:
-            data = self.recv_exact(conn, 9)
+            data = self.recv_exact(conn, SERVER_PAYLOAD_SIZE)
         except TimeoutError as e:
-            print(f"{self.RED}Timeout: {e}{self.RESET}")
+            self.ui.print_error(f"Timeout: {e}")
             raise
         except ConnectionError as e:
-            print(f"{self.RED}Connection lost: {e}{self.RESET}")
+            self.ui.print_error(f"Connection lost: {e}")
             raise
 
         try:
             result, rank, suit = BlackjackClientProtocol.unpack_payload_server(data)
         except ValueError as e:
-            print(f"{self.RED}Corrupted message from server: {e}{self.RESET}")
+            self.ui.print_error(f"Corrupted message from server: {e}")
             raise
 
         # 1. Check if card is valid and print it
         is_valid_card = (1 <= rank <= 13) and (0 <= suit <= 3)
         if is_valid_card:
-            self.print_card(rank, suit, owner)
+            self.ui.print_card(rank, suit, owner)
 
         # 2. Check result and handle logic
-        if result == 0:
+        if result == RESULT_CONTINUE:
             # Game is still going - return card value
             if not is_valid_card:
                 raise ValueError(f"Invalid card received: rank={rank}, suit={suit}")
@@ -264,91 +262,20 @@ class Client:
                 return rank
         else:
             # Game Over (Win/Loss/Tie)
-            self.print_result(result)
-            self.print_statistics()
+            self._update_stats(result)
+            self.ui.print_result(result)
+            self.ui.print_statistics(self.stats)
             return False
 
-    # --- Visual / Printing Methods ---
-
-    def print_welcome_joker(self):
-        """Prints a cool ASCII Art Joker at startup."""
-        joker_art = f"""{self.YELLOW}
-           .------.
-          |A .   |
-          | / \\  |
-          |(_,_) |  Welcome to
-          |  I   |  Blackjack 2025!
-          `------'{self.RESET}
-        """
-        print(joker_art)
-
-    def print_card(self, rank, suit, owner=""):
-        """Prints a card with graphical suits and colors."""
-        # Visual Mapping
-        suits_symbols = {0: "♥", 1: "♦", 2: "♣", 3: "♠"}
-        ranks_map = {1: "A", 11: "J", 12: "Q", 13: "K"}
-        
-        # Determine Rank String
-        rank_str = ranks_map.get(rank, str(rank))
-        symbol = suits_symbols.get(suit, "?")
-        
-        # Color Logic: Hearts/Diamonds are RED, Clubs/Spades are WHITE (or default)
-        # Using ANSI colors directly
-        color = self.RED if suit in [0, 1] else self.CYAN
-        
-        # Print owner label
-        if owner:
-            owner_color = self.GREEN if owner == "Player" else self.YELLOW
-            print(f"{owner_color}[{owner}'s Card]{self.RESET}")
-        
-        # ASCII Card Frame
-        card_art = (
-            f"{color}"
-            f"┌───────┐\n"
-            f"| {rank_str:<2}    |\n"
-            f"|   {symbol}   |\n"
-            f"|    {rank_str:>2} |\n"
-            f"└───────┘{self.RESET}"
-        )
-        print(card_art)
-
-    def print_result(self, result_code):
+    def _update_stats(self, result_code):
+        """Updates statistics based on result code."""
         self.stats["rounds_played"] += 1
-        if result_code == 0x3:  # WIN
+        if result_code == RESULT_WIN:
             self.stats["wins"] += 1
-        elif result_code == 0x2:  # LOSS
+        elif result_code == RESULT_LOSS:
             self.stats["losses"] += 1
-            self.stats["player_busts"] += 1
-        elif result_code == 0x1:  # TIE
+        elif result_code == RESULT_TIE:
             self.stats["ties"] += 1
-        
-        """Prints the final game outcome with flair."""
-        print("-" * 30)
-        if result_code == 0x3:
-            print(f"{self.GREEN}🏆  WINNER WINNER CHICKEN DINNER! 🏆{self.RESET}")
-        elif result_code == 0x2:
-            print(f"{self.RED}💀  YOU BUSTED / LOST! 💀{self.RESET}")
-        elif result_code == 0x1:
-            print(f"{self.YELLOW}⚖️  IT'S A TIE! ⚖️{self.RESET}")
-        else:
-            print(f"Unknown result code: {result_code}")
-        print("-" * 30)
-            
-    def print_statistics(self):
-        print("\n" + "=" * 40)
-        print(f"{self.CYAN}📊 Game Statistics 📊{self.RESET}")
-        print(f"Rounds played : {self.stats['rounds_played']}")
-        print(f"Wins          : {self.stats['wins']}")
-        print(f"Losses        : {self.stats['losses']}")
-        print(f"Ties          : {self.stats['ties']}")
-
-        if self.stats["rounds_played"] > 0:
-            win_rate = self.stats["wins"] / self.stats["rounds_played"]
-            print(f"Win rate      : {win_rate:.2%}")
-
-        print(f"Hits          : {self.stats['hits']}")
-        print(f"Stands        : {self.stats['stands']}")
-        print("=" * 40)
 
 
 if __name__ == "__main__":
