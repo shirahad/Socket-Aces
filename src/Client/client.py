@@ -23,6 +23,17 @@ class Client:
     def __init__(self):
         self.print_welcome_joker()
         print(f"{self.GREEN}Client started, listening for offer requests...{self.RESET}")
+        
+        self.stats = {
+        "rounds_played": 0,
+        "wins": 0,
+        "losses": 0,
+        "ties": 0,
+        "player_busts": 0,
+        "dealer_busts": 0,
+        "hits": 0,
+        "stands": 0
+        }
 
     def start(self):
         """
@@ -103,6 +114,7 @@ class Client:
         except Exception as e:
             print(f"{self.RED}Connection error: {e}{self.RESET}")
         finally:
+            self.print_statistics()
             tcp_socket.close()
 
     def get_strategy_advice(self, player_sum, dealer_card_rank):
@@ -164,9 +176,11 @@ class Client:
 
                 if decision == "Stand":
                     print("Standing. Watching Dealer...")
+                    self.stats["stands"] += 1
                     break
                 
                 elif decision == "Hit":
+                    self.stats["stands"] += 1
                     val = self.receive_and_print_card(conn)
                     if val is False: return True # Bust/Game Over
                     player_hand_val += val # Update sum for next advice
@@ -284,6 +298,15 @@ class Client:
         print(card_art)
 
     def print_result(self, result_code):
+        self.stats["rounds_played"] += 1
+        if result_code == 0x3:  # WIN
+            self.stats["wins"] += 1
+        elif result_code == 0x2:  # LOSS
+            self.stats["losses"] += 1
+            self.stats["player_busts"] += 1
+        elif result_code == 0x1:  # TIE
+            self.stats["ties"] += 1
+        
         """Prints the final game outcome with flair."""
         print("-" * 30)
         if result_code == 0x3:
@@ -295,6 +318,23 @@ class Client:
         else:
             print(f"Unknown result code: {result_code}")
         print("-" * 30)
+            
+    def print_statistics(self):
+        print("\n" + "=" * 40)
+        print(f"{self.CYAN}📊 Game Statistics 📊{self.RESET}")
+        print(f"Rounds played : {self.stats['rounds_played']}")
+        print(f"Wins          : {self.stats['wins']}")
+        print(f"Losses        : {self.stats['losses']}")
+        print(f"Ties          : {self.stats['ties']}")
+
+        if self.stats["rounds_played"] > 0:
+            win_rate = self.stats["wins"] / self.stats["rounds_played"]
+            print(f"Win rate      : {win_rate:.2%}")
+
+        print(f"Hits          : {self.stats['hits']}")
+        print(f"Stands        : {self.stats['stands']}")
+        print("=" * 40)
+
 
 if __name__ == "__main__":
     client = Client()
