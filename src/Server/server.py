@@ -10,8 +10,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from BlackjackServerProtocol import BlackjackServerProtocol
 from shared.blackjack_game import BlackjackGame
 from shared.protocol_constants import (
-    RESULT_WIN, RESULT_LOSS, RESULT_TIE, RESULT_CONTINUE,
-    REQUEST_PACKET_SIZE, CLIENT_PAYLOAD_SIZE
+    RESULT_WIN, RESULT_LOSS, RESULT_CONTINUE,
+    CLIENT_PAYLOAD_SIZE
 )
 
 class Server:

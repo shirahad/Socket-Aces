@@ -12,7 +12,7 @@ class BlackjackGame:
     """
     
     # Reshuffle when deck gets below this threshold
-    RESHUFFLE_THRESHOLD = 10
+    RESHUFFLE_THRESHOLD = 5
     
     def __init__(self):
         self.deck = self._create_deck()
@@ -80,7 +80,6 @@ class BlackjackGame:
     def calculate_score(self, hand):
         """
         Calculates hand value.
-        Aces count as 11, but can be reduced to 1 if bust.
         """
         score = 0
         
