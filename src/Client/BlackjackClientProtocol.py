@@ -12,7 +12,7 @@ class BlackjackClientProtocol:
     MSG_PAYLOAD = 0x4
     
     # --- 1. Offer Message (Server -> Broadcast) ---
-    # Format: [Magic 4] [Type 1] [Port 2] [Name 32] [cite: 85-90]
+    # Format: [Magic 4] [Type 1] [Port 2] [Name 32] 
 
     @staticmethod
     def unpack_offer(data):
@@ -31,7 +31,7 @@ class BlackjackClientProtocol:
         return server_port, server_name
 
     # --- 2. Request Message (Client -> Server) ---
-    # Format: [Magic 4] [Type 1] [Rounds 1] [Name 32] [cite: 91-95]
+    # Format: [Magic 4] [Type 1] [Rounds 1] [Name 32] 
 
     @staticmethod
     def pack_request(rounds, team_name):
@@ -45,7 +45,7 @@ class BlackjackClientProtocol:
 
 
     # --- 3. Payload: Game Status / Card (Server -> Client) ---
-    # Format: [Magic 4] [Type 1] [Result 1] [Rank 2] [Suit 1] [cite: 96, 101-103]
+    # Format: [Magic 4] [Type 1] [Result 1] [Rank 2] [Suit 1]
     @staticmethod
     def unpack_payload_server(data):
         """Used by Client to read cards or game results."""
@@ -62,7 +62,7 @@ class BlackjackClientProtocol:
         return result_code, card_rank, card_suit
 
     # --- 4. Payload: Player Action (Client -> Server) ---
-    # Format: [Magic 4] [Type 1] [Decision 5] [cite: 96, 100]
+    # Format: [Magic 4] [Type 1] [Decision 5] 
 
     @staticmethod
     def pack_player_decision(decision):

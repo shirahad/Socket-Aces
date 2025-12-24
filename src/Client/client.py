@@ -245,15 +245,23 @@ class Client:
             print(f"{self.RED}Corrupted message from server: {e}{self.RESET}")
             raise
 
-        # 1. Always print the card if there is one 
-        # Even if 'result' says we lost, we want to see the card that killed us!
-        if rank in range(1, 14) and suit in range(0, 4):
+        # 1. Check if card is valid and print it
+        is_valid_card = (1 <= rank <= 13) and (0 <= suit <= 3)
+        if is_valid_card:
             self.print_card(rank, suit, owner)
 
-        # 2. Check the Result
+        # 2. Check result and handle logic
         if result == 0:
-            # Game is still going
-            return 11 if rank == 1 else 10 if rank >= 10 else rank
+            # Game is still going - return card value
+            if not is_valid_card:
+                raise ValueError(f"Invalid card received: rank={rank}, suit={suit}")
+            # Return card value: Ace=11, Face cards=10, others=face value
+            if rank == 1:
+                return 11
+            elif rank >= 10:
+                return 10
+            else:
+                return rank
         else:
             # Game Over (Win/Loss/Tie)
             self.print_result(result)
