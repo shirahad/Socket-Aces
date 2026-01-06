@@ -74,6 +74,12 @@ class Server:
     def broadcast_offer(self):
         """Sends UDP Offer packets every 1 second."""
         udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # --- FORCE WI-FI / HOTSPOT IP ---
+        # This prevents the OS from using Ethernet 2
+        try:
+            udp_sock.bind((self.server_ip, 0))
+        except Exception as e:
+            print(f"Bind warning: {e}")
         udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
         # Use the protocol class to pack the offer message
