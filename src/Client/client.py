@@ -25,6 +25,9 @@ class Client:
 
     def __init__(self):
         self.ui = BlackjackUI()
+
+        # Ask number of rounds ONCE per client run
+        self.rounds_to_play = None
         
         self.stats = {
             "rounds_played": 0,
@@ -41,13 +44,17 @@ class Client:
         """
         Main application loop.
         """
+        # Assignment step 3: ask user for number of rounds
+        if self.rounds_to_play is None:
+            self.rounds_to_play = self.ui.get_rounds_input()
+
         while True:
             try:
                 # Step 1: Find a server via UDP broadcast
                 server_ip, server_port = self.find_server()
                 
                 # Step 2: Connect and play
-                self.connect_and_play(server_ip, server_port)
+                self.connect_and_play(server_ip, server_port, self.rounds_to_play)
 
             except Exception as e:
                 self.ui.print_error(f"Error in main loop: {e}")
@@ -80,7 +87,7 @@ class Client:
                 udp_socket.close()
                 raise
 
-    def connect_and_play(self, ip, port):
+    def connect_and_play(self, ip, port, rounds):
         """
         Establishes TCP connection and manages the game session.
         """
@@ -93,9 +100,6 @@ class Client:
             # Set recv timeout for game communication
             tcp_socket.settimeout(self.TCP_RECV_TIMEOUT)
             
-            # --- Handshake ---
-            rounds = self.ui.get_rounds_input()
-
             # Send Request Packet
             req_packet = BlackjackClientProtocol.pack_request(rounds, self.TEAM_NAME)
             tcp_socket.sendall(req_packet)
@@ -108,6 +112,12 @@ class Client:
                     break 
             
             self.ui.print_info("Session finished. Disconnecting.")
+
+            # Assignment step 10: summary then immediately go back to listening
+            rounds_played = self.stats.get("rounds_played", 0)
+            wins = self.stats.get("wins", 0)
+            win_rate = (wins / rounds_played) if rounds_played else 0.0
+            self.ui.print_info(f"Finished playing {rounds_played} rounds, win rate: {win_rate:.2%}")
 
         except Exception as e:
             self.ui.print_error(f"Connection error: {e}")
@@ -178,13 +188,13 @@ class Client:
                 
                 elif decision == "Hit":
                     self.stats["hits"] += 1
-                    val = self.receive_and_print_card(conn)
+                    val = self.receive_and_print_card(conn, "Player")
                     if val is False: return True # Bust/Game Over
                     player_hand_val += val # Update sum for next advice
 
             # --- 3. Dealer Turn ---
             while True:
-                if self.receive_and_print_card(conn) is False:
+                if self.receive_and_print_card(conn, "Dealer") is False:
                     break
             return True
             
