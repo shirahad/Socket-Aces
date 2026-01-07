@@ -37,16 +37,21 @@ class Server:
         print(f"Server started, listening on IP address {self.server_ip}")
 
     def get_local_ip(self):
-        """Attempts to find the local IP address visible to the network."""
-        try:
-            # Connect to a dummy external IP to get the interface IP
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
+        """
+        Finds the local IP address.
+        CRASHES if no network is found.
+        """
+        # We purposely do NOT use try/except here.
+        # If this fails, we want the program to stop so we know 
+        # something is wrong with the network connection.
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        # We don't actually send data, just check the route to Google
+        s.connect(("8.8.8.8", 80)) 
+        
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
 
     def start(self):
         """Main entry point: starts UDP broadcast and TCP listener."""
