@@ -157,21 +157,24 @@ class Client:
             # --- 1. Initial Deal ---
             self.ui.print_waiting_for_cards()
             
-            player_hand_val = 0
+            player_hand = []  # Store actual card ranks
             dealer_up_card = 0
 
             # Receive 2 player cards + 1 dealer card (face-up)
             for i in range(2):
-                val = self.receive_and_print_card(conn, "Player")
-                if not val:
+                rank = self.receive_and_print_card(conn, "Player")
+                if not rank:
                     return False
-                player_hand_val += val
+                player_hand.append(rank)
             dealer_up_card = self.receive_and_print_card(conn, "Dealer")
             if not dealer_up_card:
                 return False
 
             # --- 2. Player Turn ---
             while True:
+                # Calculate flexible hand value
+                player_hand_val = self._calculate_hand_value(player_hand)
+                
                 # Get Advice
                 advice = self.get_strategy_advice(player_hand_val, dealer_up_card)
                 self.ui.print_advice(advice)
@@ -188,9 +191,9 @@ class Client:
                 
                 elif decision == "Hit":
                     self.stats["hits"] += 1
-                    val = self.receive_and_print_card(conn, "Player")
-                    if val is False: return True # Bust/Game Over
-                    player_hand_val += val # Update sum for next advice
+                    rank = self.receive_and_print_card(conn, "Player")
+                    if rank is False: return True # Bust/Game Over
+                    player_hand.append(rank) # Add new card rank
 
             # --- 3. Dealer Turn ---
             while True:
@@ -263,19 +266,39 @@ class Client:
             # Game is still going - return card value
             if not is_valid_card:
                 raise ValueError(f"Invalid card received: rank={rank}, suit={suit}")
-            # Return card value: Ace=11, Face cards=10, others=face value
-            if rank == 1:
-                return 11
-            elif rank >= 10:
-                return 10
-            else:
-                return rank
+            # Return card rank for flexible Ace calculation
+            # Client now tracks actual ranks to calculate flexible hand value
+            return rank
         else:
             # Game Over (Win/Loss/Tie)
             self._update_stats(result)
             self.ui.print_result(result)
             self.ui.print_statistics(self.stats)
             return False
+
+    def _calculate_hand_value(self, hand):
+        """
+        Calculates hand value with flexible Ace handling.
+        Aces count as 11 if possible, otherwise 1.
+        """
+        score = 0
+        num_aces = 0
+        
+        for rank in hand:
+            if rank == 1:  # Ace
+                score += 11
+                num_aces += 1
+            elif rank >= 10:  # Face cards (J, Q, K)
+                score += 10
+            else:
+                score += rank
+        
+        # Adjust Aces from 11 to 1 if needed to avoid bust
+        while score > 21 and num_aces > 0:
+            score -= 10  # Convert one Ace from 11 to 1
+            num_aces -= 1
+        
+        return score
 
     def _update_stats(self, result_code):
         """Updates statistics based on result code."""

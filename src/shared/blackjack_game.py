@@ -79,17 +79,25 @@ class BlackjackGame:
     
     def calculate_score(self, hand):
         """
-        Calculates hand value.
+        Calculates hand value with flexible Ace handling.
+        Aces count as 11 if possible, otherwise 1.
         """
         score = 0
+        num_aces = 0
         
         for rank, suit in hand:
             if rank == 1:  # Ace
                 score += 11
+                num_aces += 1
             elif rank >= 10:  # Face cards (J, Q, K)
                 score += 10
             else:
                 score += rank
+        
+        # Adjust Aces from 11 to 1 if needed to avoid bust
+        while score > 21 and num_aces > 0:
+            score -= 10  # Convert one Ace from 11 to 1
+            num_aces -= 1
 
         return score
     
