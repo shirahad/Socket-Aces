@@ -26,8 +26,11 @@ class Client:
     def __init__(self):
         self.ui = BlackjackUI()
 
-        # Ask number of rounds ONCE per client run
+        # Settings asked once at startup
         self.rounds_to_play = None
+        self.betting_enabled = False
+        self.balance = 1000  # Starting balance
+        self.current_bet = 0
         
         self.stats = {
             "rounds_played": 0,
@@ -37,24 +40,56 @@ class Client:
             "player_busts": 0,
             "dealer_busts": 0,
             "hits": 0,
-            "stands": 0
+            "stands": 0,
+            "total_wagered": 0,
+            "total_won": 0,
+            "biggest_win": 0,
+            "biggest_loss": 0
         }
 
     def start(self):
         """
         Main application loop.
         """
-        # Assignment step 3: ask user for number of rounds
-        if self.rounds_to_play is None:
-            self.rounds_to_play = self.ui.get_rounds_input()
-
+        # Ask for settings ONCE at startup (step 3)
+        self.rounds_to_play = self.ui.get_rounds_input()
+        self.betting_enabled = self.ui.get_betting_mode_choice()
+        if self.betting_enabled:
+            self.ui.print_info(f"Starting balance: ${self.balance}")
+        
+        # Run forever, listening for servers (step 4+)
         while True:
             try:
-                # Step 1: Find a server via UDP broadcast
+                # Reset stats for new session (but keep same rounds setting)
+                self.stats = {
+                    "rounds_played": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "ties": 0,
+                    "player_busts": 0,
+                    "dealer_busts": 0,
+                    "hits": 0,
+                    "stands": 0,
+                    "total_wagered": 0,
+                    "total_won": 0,
+                    "biggest_win": 0,
+                    "biggest_loss": 0
+                }
+                
+                if self.betting_enabled:
+                    self.balance = 1000  # Reset balance for new session
+                
+                # Clear UI for fresh start
+                self.ui.reset_for_new_session()
+                
+                # Step 4: Listen for server via UDP broadcast
                 server_ip, server_port = self.find_server()
                 
-                # Step 2: Connect and play
+                # Step 6: Connect and play
                 self.connect_and_play(server_ip, server_port, self.rounds_to_play)
+                
+                # Step 10: Print summary then immediately return to step 4
+                # (No asking if they want to play again - just loop back to listening)
 
             except Exception as e:
                 self.ui.print_error(f"Error in main loop: {e}")
@@ -106,18 +141,40 @@ class Client:
 
             # --- Game Loop ---
             for i in range(rounds):
+                # Check if player is broke
+                if self.betting_enabled and self.balance <= 0:
+                    self.ui.print_error("You're out of money! Game over.")
+                    break
+                
+                # Place bet if betting is enabled
+                if self.betting_enabled:
+                    self.current_bet = self.ui.get_bet_amount(self.balance)
+                    if self.current_bet <= 0 or self.current_bet > self.balance:
+                        self.ui.print_error("Invalid bet amount. Skipping round.")
+                        continue
+                    self.stats["total_wagered"] += self.current_bet
+                    self.ui.print_info(f"Bet placed: ${self.current_bet} | Balance: ${self.balance}")
+                
                 self.ui.print_round_header(i + 1)
                 success = self.play_round(tcp_socket)
                 if not success:
                     break 
             
-            self.ui.print_info("Session finished. Disconnecting.")
-
-            # Assignment step 10: summary then immediately go back to listening
+            # Step 10: Print summary as per instructions
             rounds_played = self.stats.get("rounds_played", 0)
             wins = self.stats.get("wins", 0)
             win_rate = (wins / rounds_played) if rounds_played else 0.0
             self.ui.print_info(f"Finished playing {rounds_played} rounds, win rate: {win_rate:.2%}")
+            
+            # Show betting summary if enabled
+            if self.betting_enabled:
+                profit = self.balance - 1000
+                if profit > 0:
+                    self.ui.print_info(f"💰 Session profit: +${profit} | Final balance: ${self.balance}")
+                elif profit < 0:
+                    self.ui.print_info(f"💸 Session loss: ${profit} | Final balance: ${self.balance}")
+                else:
+                    self.ui.print_info(f"Even money! Final balance: ${self.balance}")
 
         except Exception as e:
             self.ui.print_error(f"Connection error: {e}")
@@ -303,6 +360,28 @@ class Client:
     def _update_stats(self, result_code):
         """Updates statistics based on result code."""
         self.stats["rounds_played"] += 1
+        
+        # Handle betting
+        if self.betting_enabled:
+            if result_code == RESULT_WIN:
+                winnings = self.current_bet * 2  # Win pays 1:1, get bet back + profit
+                self.balance += winnings
+                profit = self.current_bet
+                self.stats["total_won"] += profit
+                if profit > self.stats["biggest_win"]:
+                    self.stats["biggest_win"] = profit
+                self.ui.print_info(f"💰 Won ${winnings}! Balance: ${self.balance}")
+            elif result_code == RESULT_LOSS:
+                loss = self.current_bet
+                self.balance -= loss
+                if loss > self.stats["biggest_loss"]:
+                    self.stats["biggest_loss"] = loss
+                self.ui.print_info(f"💸 Lost ${loss}. Balance: ${self.balance}")
+            elif result_code == RESULT_TIE:
+                # Push - get bet back
+                self.ui.print_info(f"🤝 Push! Bet returned. Balance: ${self.balance}")
+        
+        # Update win/loss stats
         if result_code == RESULT_WIN:
             self.stats["wins"] += 1
         elif result_code == RESULT_LOSS:

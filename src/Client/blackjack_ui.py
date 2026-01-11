@@ -203,6 +203,27 @@ class BlackjackUI:
         msg = str(message)
         self._set_activity(msg)
 
+    def reset_for_new_session(self):
+        """Reset UI for a new game session."""
+        def _do():
+            self._phase = "waiting"
+            self._set_var(self._round_var, "Waiting")
+            self._set_var(self._status_var, "Waiting for server...")
+            self._set_var(self._advice_var, "")
+            self._set_var(self._result_var, "")
+            self._set_var(self._result_style_var, "neutral")
+            self._clear_cards()
+            # Reset stats display
+            self._set_var(self._stat_rounds_var, "0")
+            self._set_var(self._stat_wins_var, "0")
+            self._set_var(self._stat_losses_var, "0")
+            self._set_var(self._stat_ties_var, "0")
+            self._set_var(self._stat_win_rate_var, "0.00%")
+            self._set_var(self._stat_hits_var, "0")
+            self._set_var(self._stat_stands_var, "0")
+        self._run_on_ui(_do)
+        self._set_activity("Starting new session...")
+
     def get_rounds_input(self):
         return int(self._call_ui_sync(self._ask_rounds_modal))
 
@@ -213,6 +234,18 @@ class BlackjackUI:
         self._set_status("Invalid input")
         self._set_activity("Invalid decision. Please choose Hit or Stand.")
         self._run_on_ui(lambda: messagebox.showwarning("Invalid input", "Please choose exactly: Hit or Stand.") if messagebox else None)
+
+    def get_betting_mode_choice(self):
+        """Ask user if they want to enable betting mode."""
+        return bool(self._call_ui_sync(self._ask_betting_mode_modal))
+
+    def get_bet_amount(self, balance):
+        """Ask user for bet amount."""
+        return int(self._call_ui_sync(lambda: self._ask_bet_amount_modal(balance)))
+
+    def get_play_again_choice(self):
+        """Ask user if they want to play another session."""
+        return bool(self._call_ui_sync(self._ask_play_again_modal))
 
     # -----------------------------
     # Tk thread + plumbing
@@ -268,8 +301,9 @@ class BlackjackUI:
             if self._root is not None:
                 self._root.destroy()
         finally:
-            # Client loop is blocking; clean exit on close.
-            raise SystemExit(0)
+            # Force exit entire application including all threads
+            import os
+            os._exit(0)
 
     def _drain_actions(self):
         if self._root is None:
@@ -688,3 +722,189 @@ class BlackjackUI:
         if self._decision_var is None:
             return
         self._decision_var.set(value)
+
+    def _ask_betting_mode_modal(self) -> bool:
+        """Modal dialog asking if user wants betting mode."""
+        dlg = tk.Toplevel(self._root)
+        dlg.title("Game Mode")
+        dlg.transient(self._root)
+        dlg.grab_set()
+        
+        try:
+            dlg.configure(bg="#1a2332")
+        except Exception:
+            pass
+
+        outer = ttk.Frame(dlg, padding=24)
+        outer.grid(row=0, column=0, sticky="nsew")
+        dlg.columnconfigure(0, weight=1)
+        dlg.rowconfigure(0, weight=1)
+
+        ttk.Label(outer, text="Choose Game Mode", font=("Segoe UI", 14, "bold")).grid(
+            row=0, column=0, columnspan=2, pady=(0, 16)
+        )
+
+        ttk.Label(outer, text="Play with betting to track your winnings!", font=("Segoe UI", 10)).grid(
+            row=1, column=0, columnspan=2, pady=(0, 16)
+        )
+
+        result = {"value": False}
+
+        def _no_betting():
+            result["value"] = False
+            dlg.destroy()
+
+        def _with_betting():
+            result["value"] = True
+            dlg.destroy()
+
+        ttk.Button(outer, text="Play Without Betting", command=_no_betting).grid(
+            row=2, column=0, padx=5, pady=5, sticky="ew"
+        )
+        ttk.Button(outer, text="Play With Betting ($1000)", style="Action.TButton", command=_with_betting).grid(
+            row=2, column=1, padx=5, pady=5, sticky="ew"
+        )
+
+        dlg.protocol("WM_DELETE_WINDOW", _no_betting)
+
+        try:
+            dlg.update_idletasks()
+            x = self._root.winfo_rootx() + (self._root.winfo_width() // 2) - (dlg.winfo_width() // 2)
+            y = self._root.winfo_rooty() + (self._root.winfo_height() // 2) - (dlg.winfo_height() // 2)
+            dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+        except Exception:
+            pass
+
+        self._root.wait_window(dlg)
+        return result["value"]
+
+    def _ask_bet_amount_modal(self, balance: int) -> int:
+        """Modal dialog asking for bet amount."""
+        dlg = tk.Toplevel(self._root)
+        dlg.title("Place Your Bet")
+        dlg.transient(self._root)
+        dlg.grab_set()
+        
+        try:
+            dlg.configure(bg="#1a2332")
+        except Exception:
+            pass
+
+        outer = ttk.Frame(dlg, padding=24)
+        outer.grid(row=0, column=0, sticky="nsew")
+        dlg.columnconfigure(0, weight=1)
+        dlg.rowconfigure(0, weight=1)
+
+        ttk.Label(outer, text="Place Your Bet", font=("Segoe UI", 14, "bold")).grid(
+            row=0, column=0, columnspan=2, pady=(0, 16)
+        )
+
+        ttk.Label(outer, text=f"Current Balance: ${balance}", font=("Segoe UI", 11)).grid(
+            row=1, column=0, columnspan=2, pady=(0, 12)
+        )
+
+        bet_var = tk.StringVar(value="10")
+        result = {"value": 10}
+
+        def _submit():
+            try:
+                bet = int(bet_var.get())
+                if bet > 0 and bet <= balance:
+                    result["value"] = bet
+                    dlg.destroy()
+                else:
+                    messagebox.showwarning("Invalid Bet", f"Please enter a bet between $1 and ${balance}")
+            except ValueError:
+                messagebox.showwarning("Invalid Bet", "Please enter a valid number")
+
+        # Quick bet buttons
+        ttk.Label(outer, text="Quick Bets:").grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 5))
+        
+        btn_frame = ttk.Frame(outer)
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=(0, 12))
+        
+        for i, amount in enumerate([10, 25, 50, 100]):
+            if amount <= balance:
+                ttk.Button(btn_frame, text=f"${amount}", 
+                          command=lambda a=amount: (bet_var.set(str(a)), _submit())).grid(
+                    row=0, column=i, padx=2
+                )
+
+        ttk.Label(outer, text="Custom Amount:").grid(row=4, column=0, sticky="w", pady=(0, 5))
+        bet_entry = ttk.Entry(outer, textvariable=bet_var, width=15, font=("Segoe UI", 11))
+        bet_entry.grid(row=5, column=0, columnspan=2, pady=(0, 16), sticky="ew")
+        bet_entry.focus()
+
+        ttk.Button(outer, text="Place Bet", style="Action.TButton", command=_submit).grid(
+            row=6, column=0, columnspan=2, pady=5, sticky="ew"
+        )
+
+        dlg.protocol("WM_DELETE_WINDOW", _submit)
+        dlg.bind("<Return>", lambda _e: _submit())
+        bet_entry.bind("<Return>", lambda _e: _submit())
+
+        try:
+            dlg.update_idletasks()
+            x = self._root.winfo_rootx() + (self._root.winfo_width() // 2) - (dlg.winfo_width() // 2)
+            y = self._root.winfo_rooty() + (self._root.winfo_height() // 2) - (dlg.winfo_height() // 2)
+            dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+        except Exception:
+            pass
+
+        self._root.wait_window(dlg)
+        return result["value"]
+
+    def _ask_play_again_modal(self) -> bool:
+        """Modal dialog asking if user wants to play another session."""
+        dlg = tk.Toplevel(self._root)
+        dlg.title("Session Complete")
+        dlg.transient(self._root)
+        dlg.grab_set()
+        
+        try:
+            dlg.configure(bg="#1a2332")
+        except Exception:
+            pass
+
+        outer = ttk.Frame(dlg, padding=24)
+        outer.grid(row=0, column=0, sticky="nsew")
+        dlg.columnconfigure(0, weight=1)
+        dlg.rowconfigure(0, weight=1)
+
+        ttk.Label(outer, text="Game session finished!", font=("Segoe UI", 14, "bold")).grid(
+            row=0, column=0, columnspan=2, pady=(0, 16)
+        )
+
+        ttk.Label(outer, text="Would you like to play another session?").grid(
+            row=1, column=0, columnspan=2, pady=(0, 16)
+        )
+
+        result = {"value": False}
+
+        def _yes():
+            result["value"] = True
+            dlg.destroy()
+
+        def _no():
+            result["value"] = False
+            dlg.destroy()
+
+        ttk.Button(outer, text="Yes, Play Again", style="Action.TButton", command=_yes).grid(
+            row=2, column=0, padx=5, pady=5, sticky="ew"
+        )
+        ttk.Button(outer, text="No, Exit", command=_no).grid(
+            row=2, column=1, padx=5, pady=5, sticky="ew"
+        )
+
+        dlg.protocol("WM_DELETE_WINDOW", _no)
+
+        try:
+            dlg.update_idletasks()
+            x = self._root.winfo_rootx() + (self._root.winfo_width() // 2) - (dlg.winfo_width() // 2)
+            y = self._root.winfo_rooty() + (self._root.winfo_height() // 2) - (dlg.winfo_height() // 2)
+            dlg.geometry(f"+{max(0, x)}+{max(0, y)}")
+        except Exception:
+            pass
+
+        self._root.wait_window(dlg)
+        return result["value"]
