@@ -51,16 +51,18 @@ class Client:
         """
         Main application loop.
         """
-        # Ask for settings ONCE at startup (step 3)
-        self.rounds_to_play = self.ui.get_rounds_input()
+        # Ask for betting mode once at startup; rounds are chosen per session.
         self.betting_enabled = self.ui.get_betting_mode_choice()
         if self.betting_enabled:
             self.ui.print_info(f"Starting balance: ${self.balance}")
-        
-        # Run forever, listening for servers (step 4+)
+
+        # Run forever: choose rounds -> listen for a server -> play -> disconnect -> repeat.
         while True:
             try:
-                # Reset stats for new session (but keep same rounds setting)
+                # Ask for rounds EACH session (so after a game finishes, we come back here).
+                self.rounds_to_play = self.ui.get_rounds_input()
+
+                # Reset stats for a new session
                 self.stats = {
                     "rounds_played": 0,
                     "wins": 0,
@@ -89,11 +91,11 @@ class Client:
                 self.connect_and_play(server_ip, server_port, self.rounds_to_play)
                 
                 # Step 10: Print summary then immediately return to step 4
-                # (No asking if they want to play again - just loop back to listening)
+                # After disconnect / session end we loop back to the rounds prompt.
 
             except Exception as e:
                 self.ui.print_error(f"Error in main loop: {e}")
-                self.ui.print_info("Restarting listener...")
+                self.ui.print_info("Restarting...")
 
     def find_server(self):
         """
